@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Smart Vestment</title>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- PapaParse -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background-color:#121212; color:white; font-family:'Poppins', sans-serif; text-align:center; margin:0; padding:0; }
+    header { background:linear-gradient(90deg,#00c853,#009624); padding:15px 30px; font-size:22px; font-weight:600; text-align:left; letter-spacing:1px; box-shadow:0 2px 10px rgba(0,0,0,0.4); }
+    h1 { margin-top:30px; font-size:42px; font-weight:600; }
+    .subtitle { margin-bottom:10px; font-size:16px; font-style:italic; color:#bbb; }
+    .note { margin-bottom:30px; font-size:14px; color:#aaa; line-height:1.6; background:#1f1f1f; padding:15px; border-radius:10px; display:inline-block; box-shadow:0 2px 12px rgba(0,0,0,0.3); }
+    .form-container { background-color:#1e1e1e; display:grid; grid-template-columns:1fr 1fr; gap:20px; max-width:700px; margin:auto; padding:30px; border-radius:20px; box-shadow:0 4px 20px rgba(0,0,0,0.4); animation: fadeIn 0.8s ease; }
+    @keyframes fadeIn { from { opacity:0; transform: translateY(15px); } to { opacity:1; transform: translateY(0); } }
+    .form-group { display:flex; flex-direction:column; align-items:flex-start; }
+    label { margin-bottom:8px; font-weight:600; color:#ddd; }
+    select, input { width:100%; padding:12px; border-radius:10px; border:1px solid #444; background:#2a2a2a; color:white; font-size:14px; outline:none; transition:0.3s; }
+    select:focus, input:focus { border-color:#00c853; background:#333; box-shadow:0 0 8px #00c85380; }
+    button { margin-top:30px; padding:14px 30px; background:linear-gradient(90deg,#00c853,#009624); color:white; border:none; border-radius:30px; font-size:16px; font-weight:600; cursor:pointer; transition:0.3s; box-shadow:0 4px 15px rgba(0,200,83,0.4); }
+    button:hover { transform:scale(1.05); box-shadow:0 6px 20px rgba(0,200,83,0.6); }
+    #output { text-align:center; background:#1f1f1f; padding:20px; border-radius:10px; max-width:900px; margin:30px auto; font-size:15px; box-shadow:0 2px 12px rgba(0,0,0,0.3); }
+    canvas { max-width:1000px; margin:30px auto; display:block; }
+  </style>
+</head>
+<body>
+
+  <header>UNIVERSITAS DIPONEGORO</header>
+  <h1>Smart Vestment</h1>
+  <div class="subtitle">Alat bantu investasi untuk menghitung resiko terburuk suatu instrumen investasi</div>
+  <div class="note">
+    📌 Catatan: <br>
+    Kolom 1 = Periode (Tanggal / Urutan) <br>
+    Kolom 2 = Harga Saham (Closing Price) <br>
+    Kolom 3 = Return (opsional, jika kosong akan dihitung otomatis dengan ln(Pt/Pt-1))
+  </div>
+
+  <form>
+    <div class="form-container">
+      <div class="form-group" style="grid-column: span 2;">
+        <label for="uploadCSV">Upload Data Saham (CSV)</label>
+        <input type="file" id="uploadCSV" accept=".csv">
+      </div>
+
+      <div class="form-group">
+        <label for="nominal">Nominal Investasi</label>
+        <input type="number" id="nominal" name="nominal" placeholder="contoh: 20000000">
+      </div>
+
+      <div class="form-group">
+        <label for="periode">Periode Investasi (Hari)</label>
+        <input type="number" id="periode" name="periode" placeholder="contoh: 30">
+      </div>
+
+      <div class="form-group" style="grid-column: span 2;">
+        <label for="grafik">Tampilkan Grafik</label>
+        <select id="grafik" name="grafik">
+          <option value="ya">Iya</option>
+          <option value="tidak">Tidak</option>
+        </select>
+      </div>
+    </div>
+    <button type="button" onclick="lihatData()">HITUNG</button>
+  </form>
+
+  <div id="output"></div>
+  <canvas id="chartSaham" width="1000" height="400" style="display:none;"></canvas>
+
+<script>
+let csvData = [];
+let chartInstance = null;
+
+function toNumberFromString(s) {
+  if (s === null || s === undefined) return NaN;
+  if (typeof s === 'number') return s;
+  let str = String(s).trim();
+  if (str.indexOf('.') !== -1 && str.indexOf(',') !== -1) {
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else {
+    str = str.replace(/,/g, '');
+  }
+  str = str.replace(/[^\d\.\-]/g,'');
+  const val = parseFloat(str);
+  return isNaN(val) ? NaN : val;
+}
+
+document.getElementById("uploadCSV").addEventListener("change", function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  Papa.parse(file, {
+    header: false,
+    skipEmptyLines: true,
+    complete: function(results) {
+      csvData = results.data.filter(r => r.length >= 2);
+      for (let i = 0; i < csvData.length; i++) {
+        csvData[i][1] = toNumberFromString(csvData[i][1]);
+        if (csvData[i].length >= 3) {
+          let maybeReturn = csvData[i][2];
+          csvData[i][2] = (maybeReturn && String(maybeReturn).trim() !== "") ? toNumberFromString(maybeReturn) : null;
+        } else {
+          csvData[i][2] = null;
+        }
+      }
+      for (let i = 1; i < csvData.length; i++) {
+        const prev = csvData[i-1][1];
+        const curr = csvData[i][1];
+        if ((csvData[i][2] === null || isNaN(csvData[i][2])) && !isNaN(prev) && !isNaN(curr) && prev > 0) {
+          csvData[i][2] = Math.log(curr/prev);
+        }
+      }
+      Swal.fire({ icon:'success', title:'Data berhasil diupload!', text:`Jumlah baris: ${csvData.length}`, confirmButtonColor:'#00c853' });
+    }
+  });
+});
+
+function statsFromReturns(arr) {
+  const xs = arr.map(v => Number(v)).filter(v => !isNaN(v));
+  const n = xs.length;
+  if (n === 0) return null;
+  const mean = xs.reduce((a,b)=>a+b,0)/n;
+  let m2=0, m3=0, m4=0;
+  for (const x of xs) {
+    const d = x - mean;
+    m2 += d*d;
+    m3 += d*d*d;
+    m4 += d*d*d*d;
+  }
+  const varSample = m2/(n-1);
+  const std = Math.sqrt(varSample);
+  const skew = (n/((n-1)*(n-2))) * (m3/Math.pow(std,3));
+  const kurtosis = ((n*(n+1))/((n-1)*(n-2)*(n-3))) * (m4/Math.pow(std,4)) - (3*(n-1)*(n-1))/((n-2)*(n-3));
+  return { n, mean, std, skew, kurtosis };
+}
+
+function cornishFisherECF(q, skew, kurtosis) {
+  const psi = kurtosis - 3;
+  const q2=q*q, q3=q*q*q;
+  const term2 = ((q2 - 1) * skew)/6;
+  const term3 = ((q3 - 3*q) * psi)/24;
+  const term4 = ((2*q3 - 5*q) * (skew*skew))/36;
+  const ECF = q + term2 + term3 - term4;
+  return { ECF };
+}
+
+function lihatData() {
+  if (csvData.length === 0) {
+    Swal.fire({ icon:'error', title:'Oops...', text:'Upload data saham dulu!' });
+    return;
+  }
+  const nominal = parseFloat(document.getElementById("nominal").value);
+  const periode = parseInt(document.getElementById("periode").value);
+  if (!nominal || !periode) {
+    Swal.fire({ icon:'warning', title:'Lengkapi data!', text:'Nominal dan periode wajib diisi.' });
+    return;
+  }
+
+  const returns = csvData.map(r => r[2]).filter(v => !isNaN(v));
+  const st = statsFromReturns(returns);
+  const q = 2.3263;
+  const { ECF } = cornishFisherECF(q, st.skew, st.kurtosis);
+
+  // VaR per Rp1 investasi (1 hari)
+  const VaR1perRp = Math.abs(st.mean - ECF * st.std);
+  const maxNominal = 1000000 / VaR1perRp;
+
+  // Hitung VaR total
+  const VaR1 = nominal * VaR1perRp;
+  const VaR = VaR1 * Math.sqrt(periode);
+
+  let rekomendasi = "";
+  if (VaR1 >= 1000000) {
+    rekomendasi = "⚠️ Pada periode 1 hari saja, potensi kerugian sudah lebih dari Rp1.000.000. Sebaiknya pertimbangkan instrumen lain.";
+  } else {
+    rekomendasi = "✅ Risiko pada periode 1 hari masih dalam batas wajar.";
+  }
+
+  document.getElementById("output").innerHTML = `
+    <h2>Hasil Analisis</h2>
+    <p><b>Value at Risk (Cornish–Fisher, 99%):</b> Rp ${VaR.toLocaleString('id-ID',{minimumFractionDigits:2})}</p>
+    <p>Jika Anda berinvestasi Rp ${nominal.toLocaleString('id-ID')} selama ${periode} hari, potensi kerugian maksimal adalah Rp ${VaR.toLocaleString('id-ID',{minimumFractionDigits:2})} pada tingkat kepercayaan 99%.</p>
+    <p><b>Batas Nominal Ideal:</b> Rp ${maxNominal.toLocaleString('id-ID',{minimumFractionDigits:0})} (supaya VaR1 ≤ Rp1.000.000)</p>
+    <p><b>Rekomendasi:</b> ${rekomendasi}</p>
+  `;
+
+  if (nominal > maxNominal) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'Perhatian investasi',
+      html: `Berdasarkan data historis, nominal maksimum agar VaR 1-hari ≤ Rp1.000.000 adalah <b>Rp ${Math.floor(maxNominal).toLocaleString('id-ID')}</b>.<br>Nominal yang Anda masukkan (${nominal.toLocaleString('id-ID')}) melebihi batas ini.`,
+      confirmButtonColor:'#00c853'
+    });
+  }
+
+  if (document.getElementById("grafik").value === 'ya') {
+    const ctx = document.getElementById('chartSaham').getContext('2d');
+    document.getElementById('chartSaham').style.display = 'block';
+    if (chartInstance) chartInstance.destroy();
+    const labels = csvData.map(r => r[0]);
+    const harga = csvData.map(r => r[1]);
+    chartInstance = new Chart(ctx, {
+      type:'line',
+      data:{ labels:labels, datasets:[{ label:'Harga Saham', data:harga, borderColor:'#00c853', backgroundColor:'rgba(0,200,83,0.15)', borderWidth:2, tension:0.15, pointRadius:0 }]},
+      options:{ plugins:{ legend:{ labels:{ color:'white' } } }, scales:{ x:{ ticks:{ color:'white' } }, y:{ ticks:{ color:'white' } } } }
+    });
+  }
+}
+</script>
+</body>
+</html>
